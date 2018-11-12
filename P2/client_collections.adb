@@ -125,10 +125,10 @@ package body Client_Collections is
                 Free(P_Nodo);
             else
                 loop
-                    P_Aux := P_Nodo;
-                    P_Nodo := P_Nodo.Next;
                     exit when Empty_Collection(P_Nodo.Next) or
                         To_Compare(Nick, P_Nodo.Nick);
+                    P_Aux := P_Nodo;
+                    P_Nodo := P_Nodo.Next;
                 end loop;
 
                 if To_Compare(Nick, P_Nodo.Nick) then
@@ -142,9 +142,6 @@ package body Client_Collections is
         else
             raise Client_Collection_Error;
         end if;
-    exception
-        when Client_Collection_Error =>
-            T_IO.Put_Line("Sorry, client not found");
     end Delete_Client;
 
 --------------------------------SEARCH CLIENT-----------------------------------

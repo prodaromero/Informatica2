@@ -16,18 +16,21 @@ procedure Chat_Server is
     package CM   renames Chat_Messages;
     use type CM.Messages_Type;
 
-    Server_EP:  LLU.End_Point_Type;
-    Client_EP:  LLU.End_Point_Type;
-    Host:       ASU.Unbounded_String;
-    Dir_IP:     ASU.Unbounded_String;
-    Port:       ASU.Unbounded_String;
-    Nickname:   ASU.Unbounded_String;
-    Buffer:     aliased LLU.Buffer_Type(1024);
-    Request:    ASU.Unbounded_String;
-    Reply:      ASU.Unbounded_String;
-    Mess:       CM.Messages_Type;
-    Empty:      Boolean := True;
-    Found:      Boolean := True;
+    Server_EP:      LLU.End_Point_Type;
+    Client_EP:      LLU.End_Point_Type;
+    Admin_EP:       LLU.End_Point_Type;
+    Host:           ASU.Unbounded_String;
+    Dir_IP:         ASU.Unbounded_String;
+    Port:           ASU.Unbounded_String;
+    Nickname:       ASU.Unbounded_String;
+    Buffer:         aliased LLU.Buffer_Type(1024);
+    Request:        ASU.Unbounded_String;
+    Reply:          ASU.Unbounded_String;
+    Mess:           CM.Messages_Type;
+    Empty:          Boolean := True;
+    Found:          Boolean := True;
+    Password:       ASU.Unbounded_String;
+    Password_Admin: ASU.Unbounded_String;
 
 
     Writer_Collection: CC.Collection_Type;
@@ -39,8 +42,9 @@ procedure Chat_Server is
 
 begin
 ---------------------------CONTROL OF INPUT PARAMETERS--------------------------
-    if ACL.Argument_Count = 1 then
+    if ACL.Argument_Count = 2 then
         Port := ASU.To_Unbounded_String(ACL.Argument(1));
+        Password := ASU.To_Unbounded_String(ACL.Argument(2));
     else
         raise Usage_Error;
     end if;
@@ -126,14 +130,72 @@ begin
                     when CC.Client_Collection_Error =>
                         T_IO.Put_Line("WRITER received from unknown client. IGNORED");
                 end;
+            when CM.Collection_Request => -- Collection Request message control
+                begin
+                    Admin_EP := LLU.End_Point_Type'Input(Buffer'Access);
+                    Password_Admin := ASU.Unbounded_String'Input(Buffer'Access);
+
+                    if ASU.To_String(Password_Admin) = ASU.To_String(Password) then
+                        T_IO.Put_Line("LIST_REQUEST received");
+                        Mess := CM.Collection_Data;
+                        Request := ASU.To_Unbounded_String(
+                                    CC.Collection_Image(Writer_Collection));
+
+                        LLU.Reset(Buffer);
+
+                        CM.Messages_Type'Output(Buffer'Access, Mess);
+                        ASU.Unbounded_String'Output(Buffer'Access, Request);
+
+                        LLU.Send(Admin_EP, Buffer'Access);
+                    else
+                        T_IO.Put_Line("LIST_REQUEST received. IGNORED, " &
+                                                        "incorrect password");
+                    end if;
+                exception
+                    when CC.Client_Collection_Error =>
+                        Mess := CM.Collection_Data;
+                        Request := ASU.To_Unbounded_String("There are no clients yet");
+
+                        LLU.Reset(Buffer);
+
+                        CM.Messages_Type'Output(Buffer'Access, Mess);
+                        ASU.Unbounded_String'Output(Buffer'Access, Request);
+
+                        LLU.Send(Admin_EP, Buffer'Access);
+                end;
+            when CM.Ban => -- Ban message control
+                begin
+                    Password_Admin := ASU.Unbounded_String'Input(Buffer'Access);
+                    Nickname := ASU.Unbounded_String'Input(Buffer'Access);
+
+                    if ASU.To_String(Password_Admin) = ASU.To_String(Password) then
+                        CC.Delete_Client(Writer_Collection, Nickname);
+                        T_IO.Put_Line("BAN received from " &
+                                        ASU.To_String(Nickname));
+                    else
+                        T_IO.Put_Line("BAN received. IGNORED, incorrect password");
+                    end if;
+                exception
+                    when CC.Client_Collection_Error =>
+                        T_IO.Put_Line("BAN received. IGNORED, nick not found");
+                end;
+            when CM.Shutdown =>-- Shutdown message control
+                Password_Admin := ASU.Unbounded_String'Input(Buffer'Access);
+                if ASU.To_String(Password_Admin) = ASU.To_String(Password) then
+                    T_IO.Put_Line("SHUTDOWN received");
+                    LLU.Finalize;
+                else
+                    T_IO.Put_Line("SHUTDOWN received. IGNORED, incorrect password");
+                end if;
             when others =>
                 raise Bad_Request_Error;
         end case;
+        exit when Mess = CM.Shutdown;
     end loop;
 
 exception
     when Usage_Error =>
-        T_IO.Put_Line("Usage: ./chat_server <port>");
+        T_IO.Put_Line("Usage: ./chat_server <port> <password>");
         LLU.Finalize;
     when Bad_Request_Error =>
         T_IO.Put_Line("400 Bad Request");
